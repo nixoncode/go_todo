@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/cobra"
@@ -32,7 +37,45 @@ func server() error {
 		w.Write([]byte("Hello World!"))
 	})
 
-	log.Println("Starting http server on port 8080")
-	return http.ListenAndServe(":8080", router)
+	server := &http.Server{Addr: ":8080", Handler: router}
+	serverCtx, serverStopCtx := context.WithCancel(context.Background())
 
+	log.Println("Starting http server on port 8080")
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		<-sig
+
+		// Shutdown signal with grace period of 30 seconds
+		shutdownCtx, ss := context.WithTimeout(serverCtx, 30*time.Second)
+		if ss != nil {
+			log.Fatal("Can't wait anymore", ss)
+		}
+
+		go func() {
+			<-shutdownCtx.Done()
+			if shutdownCtx.Err() == context.DeadlineExceeded {
+				log.Fatal("graceful shutdown timed out.. forcing exit.")
+			}
+		}()
+
+		// Trigger graceful shutdown
+		err := server.Shutdown(shutdownCtx)
+		if err != nil {
+			panic(err)
+		}
+		serverStopCtx()
+	}()
+
+	// Run the server
+	err := server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		return err
+	}
+
+	// Wait for server context to be stopped
+	<-serverCtx.Done()
+
+	return nil
 }
