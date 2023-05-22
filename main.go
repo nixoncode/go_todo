@@ -13,6 +13,16 @@ func init() {
 	if err != nil {
 		log.Fatalln("Failed to load env", err)
 	}
+
+	db, err := config.InitDB()
+	if err != nil {
+		log.Fatalln("Failed to open DB connection", err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatalln("Cannot connect to DB", err)
+	}
 }
 
 func main() {
